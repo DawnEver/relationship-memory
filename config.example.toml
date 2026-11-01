@@ -1,0 +1,22 @@
+# Copy to config.toml (git-ignored) or run `memory init`. Every key is optional except `root`.
+
+root = "/path/to/memory"          # data root; overridden by --root or $MEMORY_ROOT
+person = "Alice"                  # default person; others via -p <Name>
+lang = "en"                       # archive language: en | zh
+
+[sources]                         # per-person recording folders (read only, never moved)
+Alice = ["/path/to/recordings"]
+
+[context]                         # per-person background for the summarizer; --context overrides
+Alice = "The conversation has exactly two people: me and Alice."
+
+[transcribe]                      # faster-whisper
+model = "large-v3"
+device = "auto"                   # auto | cuda | cpu
+compute_type = "auto"             # auto | float16 | int8_float16 | int8
+language = ""                     # spoken language, e.g. "zh"; empty = autodetect
+initial_prompt = ""               # e.g. "以下是普通话的句子，使用简体中文和标点。"
+# drop_patterns = [...]          # regexes of known Whisper hallucinations to drop; see DEFAULTS in config.py
+
+[summarize]
+model = "anthropic:claude-sonnet-5-5"   # ai-lab "<provider>:<model>[@effort]", or "none" = transcript only
