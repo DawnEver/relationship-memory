@@ -68,10 +68,11 @@ def test_ingest_without_summarizer(tmp_path):
 def test_resummarize_reads_transcript_file(tmp_path):
     root = tmp_path / "root"
     entry = ingest.ingest_audio(root, make_audio(tmp_path), FakeTranscriber(), None, info=INFO, lang="zh")
-    ingest.resummarize(entry, FakeSummarizer(), lang="zh")
+    entry = ingest.resummarize(entry, FakeSummarizer(), lang="zh")
     meta, body = archive.read_entry(entry)
     assert meta["tags"] == ["家庭"] and meta["title"] == "公园散步"
-    assert "## 摘要" in body and "[完整对话](0905-rec.transcript.md)" in body
+    assert "## 摘要" in body and "[完整对话](0905-公园散步.transcript.md)" in body
+    assert sorted(p.name for p in entry.parent.iterdir()) == ["0905-公园散步.md", "0905-公园散步.transcript.md"]
 
 
 def test_add_note_and_index(tmp_path):
@@ -112,7 +113,7 @@ class OtherTranscriber:
         return [Segment(0.0, 1.0, "重新识别")]
 
 
-def test_force_reingests_in_place(tmp_path):
+def test_force_keeps_name_when_title_unchanged(tmp_path):
     root, src = tmp_path / "root", make_audio(tmp_path)
     first = ingest.ingest_audio(root, src, FakeTranscriber(), None, info=INFO, lang="zh")
     again = ingest.ingest_audio(root, src, OtherTranscriber(), None, info=INFO, lang="zh", force=True)
@@ -128,3 +129,12 @@ def test_index_lists_person_notes(tmp_path):
     text = ingest.build_index(root, "Alice").read_text("utf-8")
     assert "- [Likes&Dislikes](Likes&Dislikes.md)" in text
     assert text.index("Likes&Dislikes") < text.index("## 2026-11-01")
+
+
+def test_force_renames_to_new_title(tmp_path):
+    root, src = tmp_path / "root", make_audio(tmp_path)
+    old = ingest.ingest_audio(root, src, FakeTranscriber(), None, info=INFO, lang="zh")
+    new = ingest.ingest_audio(root, src, FakeTranscriber(), FakeSummarizer(), info=INFO, lang="zh", force=True)
+    assert new.name == "0905-公园散步.md"
+    assert not old.exists() and not archive.transcript_path(old).exists()
+    assert archive.transcript_path(new).is_file()

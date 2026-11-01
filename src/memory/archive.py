@@ -36,13 +36,27 @@ def slugify(text: str, max_len: int = 40) -> str:
     return slug[:max_len].rstrip("-") or "note"
 
 
-def entry_path(root: Path, when: datetime, title: str) -> Path:
-    path = day_dir(root, when) / f"{when:%H%M}-{slugify(title)}.md"
+def _free(path: Path) -> Path:
     n, cand = 2, path
     while cand.exists() or transcript_path(cand).exists():
         cand = path.with_name(f"{path.stem}-{n}.md")
         n += 1
     return cand
+
+
+def entry_path(root: Path, when: datetime, title: str) -> Path:
+    return _free(day_dir(root, when) / f"{when:%H%M}-{slugify(title)}.md")
+
+
+def retitled_path(entry: Path, title: str) -> Path:
+    """Where an existing entry belongs after its title changed (same day and HHMM); itself if unchanged."""
+    want = entry.with_name(f"{entry.stem[:4]}-{slugify(title)}.md")
+    return entry if want == entry else _free(want)
+
+
+def remove_entry(entry: Path) -> None:
+    entry.unlink(missing_ok=True)
+    transcript_path(entry).unlink(missing_ok=True)
 
 
 def atomic_write(path: Path, text: str) -> None:

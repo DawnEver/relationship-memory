@@ -121,7 +121,7 @@ def resummarize(entries: list[Path], context: Optional[str] = None, model: Optio
             typer.echo(f"skip (no transcript): {e}")
             continue
         person_root = e.resolve().parents[3]  # <person>/yyyy/mm/dd/entry.md
-        ingest.resummarize(e, summarizer, _context(person_root, context), s["lang"])
+        e = ingest.resummarize(e, summarizer, _context(person_root, context), s["lang"])
         ingest.build_index(person_root, person_root.name)
         typer.echo(e)
 

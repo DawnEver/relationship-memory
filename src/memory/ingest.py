@@ -129,7 +129,7 @@ def ingest_audio(root: Path, src: Path, transcriber: Transcriber, summarizer: Su
                  context: str = "", info: AudioInfo | None = None, lang: str = i18n.DEFAULT,
                  force: bool = False) -> Path:
     """Transcribe + summarize one recording into an entry and its transcript; the audio itself is not stored.
-    An already-ingested recording returns its entry, or with `force` is redone in place (same file names)."""
+    An already-ingested recording returns its entry, or with `force` is redone (renamed if its title changed)."""
     digest = sha256(src)
     existing = find_by_hash(root, digest)
     if existing and not force:
@@ -139,7 +139,7 @@ def ingest_audio(root: Path, src: Path, transcriber: Transcriber, summarizer: Su
     summary = summarizer.summarize(transcript, context) if summarizer and transcript else {}
     title = summary.get("title") or src.stem
 
-    entry = existing or archive.entry_path(root, info.recorded, title)
+    entry = archive.retitled_path(existing, title) if existing else archive.entry_path(root, info.recorded, title)
     meta = {
         "date": info.recorded.isoformat(),
         "type": "audio",
@@ -152,17 +152,24 @@ def ingest_audio(root: Path, src: Path, transcriber: Transcriber, summarizer: Su
     }
     write_transcript(entry, title, transcript, lang)
     write_audio_entry(entry, meta, summary, lang)
+    if existing and existing != entry:
+        archive.remove_entry(existing)
     return entry
 
 
-def resummarize(entry: Path, summarizer: Summarizer, context: str = "", lang: str = i18n.DEFAULT) -> None:
-    """Regenerate the summary level (and transcript header) from the stored transcript; file names stay stable."""
+def resummarize(entry: Path, summarizer: Summarizer, context: str = "", lang: str = i18n.DEFAULT) -> Path:
+    """Regenerate the summary level (and transcript header) from the stored transcript.
+    Returns the entry path, which follows the new title."""
     meta, _ = archive.read_entry(entry)
     transcript = read_transcript(entry)
     s = summarizer.summarize(transcript, context)
     meta.update(title=s.get("title") or meta.get("title"), tags=s.get("tags", []), people=s.get("people", []))
-    write_transcript(entry, meta["title"], transcript, lang)
-    write_audio_entry(entry, meta, s, lang)
+    target = archive.retitled_path(entry, meta["title"])
+    write_transcript(target, meta["title"], transcript, lang)
+    write_audio_entry(target, meta, s, lang)
+    if target != entry:
+        archive.remove_entry(entry)
+    return target
 
 
 def add_note(root: Path, text: str, when: datetime, title: str = "", tags: list[str] | None = None) -> Path:
