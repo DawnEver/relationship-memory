@@ -2,6 +2,8 @@
 name = "memory"
 version = "0.1.0"
 description = "Organize all memories about one person as dated Markdown, with local audio transcription and summaries."
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
   "typer>=0.12",
