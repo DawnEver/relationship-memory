@@ -52,12 +52,28 @@ SCHEMA = {
 
 
 class Summarizer(Protocol):
-    def summarize(self, transcript: str, context: str) -> dict: ...
+    def summarize(self, material: str, context: str) -> dict: ...
+
+    def learn(self, facts: str, learned: str, material: str, day: str) -> str: ...
+
+
+LEARNED_SCHEMA = {
+    "type": "object",
+    "properties": {"learned": {"type": "string", "description": "the full updated learned knowledge, Markdown"}},
+    "required": ["learned"],
+    "additionalProperties": False,
+}
+
+
+def _prompt(name: str, lang: str, **values: str) -> str:
+    text = files("memory").joinpath(f"prompts/{name}.{lang}.md").read_text("utf-8")
+    for k, v in values.items():
+        text = text.replace("{{" + k + "}}", v)
+    return text
 
 
 def instructions(context: str, lang: str) -> str:
-    template = files("memory").joinpath(f"prompts/summarize.{lang}.md").read_text("utf-8")
-    return template.replace("{{context}}", context or i18n.labels(lang)["no_context"])
+    return _prompt("summarize", lang, context=context or i18n.labels(lang)["no_context"])
 
 
 class AiLabSummarizer:
@@ -66,10 +82,17 @@ class AiLabSummarizer:
         self.client = connect(spec)
         self.lang = lang
 
-    def summarize(self, transcript: str, context: str) -> dict:
+    def summarize(self, material: str, context: str) -> dict:
         from ai_lab import ResponseRequest, Text
-        request = ResponseRequest(instructions(context, self.lang), (Text(transcript),), SCHEMA, name="memory_summary")
+        request = ResponseRequest(instructions(context, self.lang), (Text(material),), SCHEMA, name="memory_summary")
         return self.client.respond(request).value
+
+    def learn(self, facts: str, learned: str, material: str, day: str) -> str:
+        from ai_lab import ResponseRequest, Text
+        none = i18n.labels(self.lang)["no_context"]
+        prompt = _prompt("learn", self.lang, day=day, facts=facts.strip() or none, learned=learned.strip() or none)
+        request = ResponseRequest(prompt, (Text(material),), LEARNED_SCHEMA, name="memory_learned")
+        return self.client.respond(request).value["learned"].strip() + "\n"
 
 
 def create(spec: str, lang: str = i18n.DEFAULT) -> Summarizer | None:

@@ -7,9 +7,6 @@ lang = "en"                       # archive language: en | zh
 [sources]                         # per-person recording folders (read only, never moved)
 Alice = ["/path/to/recordings"]
 
-[context]                         # per-person background for the summarizer; --context overrides
-Alice = "The conversation has exactly two people: me and Alice."
-
 [transcribe]                      # faster-whisper
 model = "large-v3"
 device = "auto"                   # auto | cuda | cpu

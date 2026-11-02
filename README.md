@@ -12,14 +12,25 @@ their recording sources and background all live in `config.toml` at the project 
 
 ```
 <root>/<Person>/
-├── index.md                          # level 1: every entry, newest day first, one line each
+├── index.md              # level 1: one line per day, newest month first
+├── profile.md            # facts you write; the tool only reads it
+├── learned.md            # what the tool learned, as approved by you
+├── learned.pending.md    # proposed update to learned.md, awaiting `memory review`
 └── yyyy/mm/dd/
-    ├── HHMM-<title>.md               # level 2: metadata + summary, key disputes, next steps, key points
-    └── HHMM-<title>.transcript.md    # level 3: full conversation with timestamps
+    ├── summary.md        # level 2: the day as a whole: summary, key disputes, next steps, key points, records
+    ├── HHMM.md           # level 3: one recording's full conversation (source, duration, sha256 in frontmatter)
+    └── HHMM-<title>.md   # level 3: a written note
 ```
 
-Each level links only to the next; nothing is repeated across levels. Headings are English by default,
-or Chinese with `lang = "zh"`.
+One summary per day, written from all of that day's recordings and notes. Each level links only to
+the next; nothing is repeated across levels. Headings are English by default, or Chinese with `lang = "zh"`.
+
+**Learning, under review.** Days are processed oldest first. Each day is summarized with `profile.md`
+and `learned.md` as background, then the model proposes what the day adds (new people, places,
+ongoing threads, cues for telling speakers apart) as `learned.pending.md`; proposals from several days
+accumulate. Nothing takes effect until you review it: `memory review` shows the diff, you may edit the
+proposal, then `--accept` or `--reject`. Run `memory summarize` afterwards to rewrite the days with
+the new knowledge. Seed `profile.md` with who the speakers are before the first `ingest`.
 
 ## Setup
 
@@ -35,12 +46,15 @@ All settings are documented in [`config.example.toml`](config.example.toml). The
 ## Usage
 
 ```sh
-memory ingest [paths...] [-p <Person>] [--context "..."] [--delete]  # default: the person's sources
-memory add "first met at the station" --tag memories
-memory resummarize <entry.md> [--model deepseek:...]   # rebuild level 2 from the stored transcript
-memory index                                            # rebuild index.md
+memory ingest [paths...] [-p <Person>] [--force] [--delete]  # transcribe new recordings, re-summarize their days
+memory add "first met at the station" --tag memories          # add a note, re-summarize its day
+memory summarize [YYYY-MM-DD...] [--model deepseek:...]       # rewrite day summaries (default: every day)
+memory review [--accept | --reject]                           # review proposed learned knowledge
+memory index                                                  # rebuild index.md
 memory search <text>
 ```
+
+`--model none` transcribes only; the day summary then just lists the records.
 
 - Recording start time: a timestamp in the file name (`...-202611011228.m4a`, `20261101_093015.mp3`),
   else the container's `creation_time`, else the file's mtime.

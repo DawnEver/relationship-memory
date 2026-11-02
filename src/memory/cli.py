@@ -3,17 +3,17 @@ from __future__ import annotations
 
 import platform
 import shutil
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
-from . import archive, config, i18n, ingest
+from . import archive, config, i18n, ingest, learn
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
-RootOpt = Annotated[Optional[Path], typer.Option("--root", help="Data root; overrides MEMORY_ROOT and config.")]
-PersonOpt = Annotated[Optional[str], typer.Option("--person", "-p", help="Person folder under the root; default from config.")]
+RootOpt = Annotated[Path | None, typer.Option("--root", help="Data root; overrides MEMORY_ROOT and config.")]
+PersonOpt = Annotated[str | None, typer.Option("--person", "-p", help="Person folder under the root; default from config.")]
 
 
 def _data_root(root: Path | None) -> Path:
@@ -32,16 +32,11 @@ def _root(root: Path | None, person: str | None) -> Path:
     return _data_root(root) / person
 
 
-def _context(person_root: Path, given: str | None) -> str:
-    """Explicit --context, else the person's configured background."""
-    return given if given is not None else config.load().get("context", {}).get(person_root.name, "")
-
-
 @app.command()
 def init(root: Annotated[Path, typer.Option("--root", prompt="Data root path")],
-         person: Annotated[Optional[str], typer.Option("--person", "-p", help="Default person")] = None,
-         source: Annotated[Optional[list[Path]], typer.Option(help="Recording folder for --person (repeatable)")] = None,
-         lang: Annotated[Optional[str], typer.Option(help="Archive language: en | zh")] = None):
+         person: Annotated[str | None, typer.Option("--person", "-p", help="Default person")] = None,
+         source: Annotated[list[Path] | None, typer.Option(help="Recording folder for --person (repeatable)")] = None,
+         lang: Annotated[str | None, typer.Option(help="Archive language: en | zh")] = None):
     """Write data root, default person, its recording sources and language into config.toml."""
     root = root.expanduser().resolve()
     data: dict = {"root": str(root)}
@@ -56,16 +51,40 @@ def init(root: Annotated[Path, typer.Option("--root", prompt="Data root path")],
     typer.echo(f"config: {config.save(data)}")
 
 
+def _summarize_days(r: Path, days: set[date], model: str | None, context: str | None) -> None:
+    """Oldest day first: summarize it with the current profile, then learn from it; finally the index."""
+    from . import summarize
+
+    s = config.load()
+    summarizer = summarize.create(model or s["summarize"]["model"], s["lang"])
+    for d in sorted(days):
+        typer.echo(f"= {d}")
+        typer.echo(f"  {ingest.summarize_day(r, d, summarizer, ingest.background(r, context or ''), s['lang'])}")
+        if summarizer:
+            from ai_lab import ProviderError
+            try:
+                typer.echo(f"  {learn.learn_day(r, d, summarizer, s['lang'])}")
+            except ProviderError as e:  # one bad answer must not stop the run
+                typer.echo(f"  nothing learned from {d}: {e}", err=True)
+    ingest.build_index(r, r.name)
+    if learn.pending(r):
+        typer.echo("learned knowledge has a proposed update: run `memory review`")
+
+
+ModelOpt = Annotated[str | None, typer.Option(help="ai-lab spec or 'none'; overrides config")]
+ContextOpt = Annotated[str | None, typer.Option(help="One-off extra background, added to <person>/profile.md")]
+
+
 @app.command()
 def add(text: str, root: RootOpt = None, person: PersonOpt = None,
-        when: Annotated[Optional[datetime], typer.Option("--date")] = None,
-        title: str = "", tag: Annotated[Optional[list[str]], typer.Option("--tag")] = None):
-    """Record a text note."""
+        when: Annotated[datetime | None, typer.Option("--date")] = None,
+        title: str = "", tag: Annotated[list[str] | None, typer.Option("--tag")] = None,
+        model: ModelOpt = None, context: ContextOpt = None):
+    """Record a text note and refresh that day's summary."""
     r = _root(root, person)
     when = (when or datetime.now()).astimezone()
-    e = ingest.add_note(r, text, when, title, tag)
-    ingest.build_index(r, r.name)
-    typer.echo(e)
+    typer.echo(ingest.add_note(r, text, when, title, tag))
+    _summarize_days(r, {when.date()}, model, context)
 
 
 def _audio_files(paths: list[Path]) -> list[Path]:
@@ -77,14 +96,12 @@ def _audio_files(paths: list[Path]) -> list[Path]:
 
 
 @app.command(name="ingest")
-def ingest_cmd(paths: Annotated[Optional[list[Path]], typer.Argument(help="Files/dirs; default: config sources of the person")] = None,
-               root: RootOpt = None, person: PersonOpt = None,
-               context: Annotated[Optional[str], typer.Option(help="Background; default config [context].<person>")] = None,
-               model: Annotated[Optional[str], typer.Option(help="ai-lab spec or 'none'; overrides config")] = None,
+def ingest_cmd(paths: Annotated[list[Path] | None, typer.Argument(help="Files/dirs; default: config sources of the person")] = None,
+               root: RootOpt = None, person: PersonOpt = None, context: ContextOpt = None, model: ModelOpt = None,
                delete: Annotated[bool, typer.Option(help="Delete each audio file after it is archived")] = False,
-               force: Annotated[bool, typer.Option(help="Redo already-ingested recordings in place")] = False):
-    """Transcribe (local faster-whisper) and summarize (ai-lab) recordings into Markdown entries."""
-    from . import summarize, transcribe
+               force: Annotated[bool, typer.Option(help="Re-transcribe already-ingested recordings in place")] = False):
+    """Transcribe recordings locally (faster-whisper), then summarize each affected day (ai-lab)."""
+    from . import transcribe
 
     r = _root(root, person)
     s = config.load()
@@ -95,35 +112,46 @@ def ingest_cmd(paths: Annotated[Optional[list[Path]], typer.Argument(help="Files
     if not files:
         typer.echo("no audio files")
         return
-    lang = s["lang"]
     transcriber = transcribe.create(s["transcribe"])
-    summarizer = summarize.create(model or s["summarize"]["model"], lang)
+    days: set[date] = set()
     for f in files:
-        typer.echo(f"> {f.name}")
-        e = ingest.ingest_audio(r, f, transcriber, summarizer, _context(r, context), lang=lang, force=force)
-        ingest.build_index(r, r.name)
-        typer.echo(f"  {e}")
+        item = ingest.ingest_audio(r, f, transcriber, lang=s["lang"], force=force)
+        typer.echo(f"> {f.name}: {item or 'already archived'}")
+        if item:
+            days.add(date.fromisoformat(item.parts[-4] + "-" + item.parts[-3] + "-" + item.parts[-2]))
         if delete:
             f.unlink()
+    if days:
+        _summarize_days(r, days, model, context)
+
+
+@app.command(name="summarize")
+def summarize_cmd(days: Annotated[list[str] | None, typer.Argument(help="YYYY-MM-DD; default: every day")] = None,
+                  root: RootOpt = None, person: PersonOpt = None, model: ModelOpt = None, context: ContextOpt = None):
+    """Rewrite day summaries from the stored transcripts and notes."""
+    r = _root(root, person)
+    _summarize_days(r, {date.fromisoformat(d) for d in days} if days else set(archive.iter_days(r)), model, context)
 
 
 @app.command()
-def resummarize(entries: list[Path], context: Optional[str] = None, model: Optional[str] = None):
-    """Regenerate summary/tags from an entry's stored transcript."""
-    from . import summarize
-
-    s = config.load()
-    summarizer = summarize.create(model or s["summarize"]["model"], s["lang"])
-    if summarizer is None:
-        raise typer.BadParameter("summarizer is 'none'")
-    for e in entries:
-        if not archive.transcript_path(e).is_file():
-            typer.echo(f"skip (no transcript): {e}")
-            continue
-        person_root = e.resolve().parents[3]  # <person>/yyyy/mm/dd/entry.md
-        e = ingest.resummarize(e, summarizer, _context(person_root, context), s["lang"])
-        ingest.build_index(person_root, person_root.name)
-        typer.echo(e)
+def review(root: RootOpt = None, person: PersonOpt = None,
+           accept: Annotated[bool, typer.Option("--accept", help="Apply the proposal (edit it first if needed)")] = False,
+           reject: Annotated[bool, typer.Option("--reject", help="Discard the proposal")] = False):
+    """Review the proposed update to learned.md: show the diff, then --accept or --reject."""
+    r = _root(root, person)
+    if accept and reject:
+        raise typer.BadParameter("choose one of --accept / --reject")
+    if not learn.pending(r):
+        typer.echo("nothing to review")
+        return
+    if accept:
+        typer.echo(f"accepted: {learn.accept(r)}")
+    elif reject:
+        learn.reject(r)
+        typer.echo("rejected")
+    else:
+        typer.echo(learn.diff(r) or "proposal is identical to learned.md")
+        typer.echo(f"\nedit {archive.pending_path(r)} if needed, then `memory review --accept` or `--reject`")
 
 
 @app.command()
@@ -135,12 +163,14 @@ def index(root: RootOpt = None, person: PersonOpt = None):
 
 @app.command()
 def search(query: str, root: RootOpt = None, person: PersonOpt = None):
-    """Case-insensitive full-text search across a person's entries."""
+    """Case-insensitive full-text search across a person's archive."""
     r, q = _root(root, person), query.lower()
-    for p in archive.iter_entries(r):
+    for p in sorted(r.rglob("*.md")):
         for line in p.read_text("utf-8").splitlines():
             if q in line.lower():
                 typer.echo(f"{p.relative_to(r).as_posix()}: {line.strip()}")
+
+
 
 
 @app.command()
