@@ -9,4 +9,4 @@ Summarize the day as a whole. Fill the given schema, writing every field in Engl
 - disputes: the day's key arguments, disagreements and important discussions. For each, the topic, each side's position (say who), and the outcome (what was agreed, or still unresolved). Merge one topic spanning several recordings into one item. Most important first; empty array if none
 - plans: follow-up plans, agreements, promises and to-dos, with owner and time (empty if not mentioned)
 - tags: 3-6 topic tags
-- people: people mentioned
+- people: the speakers and people mentioned, spelled as in the background; correct near-homophones from transcription; omit names that cannot be confirmed

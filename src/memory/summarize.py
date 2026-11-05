@@ -44,7 +44,7 @@ SCHEMA = {
             },
         },
         "tags": {**_STR_LIST, "description": "3-6 topic tags"},
-        "people": {**_STR_LIST, "description": "people mentioned"},
+        "people": {**_STR_LIST, "description": "the speakers and people mentioned, spelled as in the background; omit names that cannot be confirmed"},
     },
     "required": ["title", "summary", "points", "disputes", "plans", "tags", "people"],
     "additionalProperties": False,
